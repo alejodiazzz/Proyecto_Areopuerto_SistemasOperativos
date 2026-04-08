@@ -14,7 +14,7 @@ public class AvionThread extends Thread {
     @Override
     public void run() {
         try {
-            service.aterrizar(id);
+            service.procesoCompleto(id);
         } catch (InterruptedException e) {
             System.err.println("Avión " + id + " interrumpido.");
             Thread.currentThread().interrupt();

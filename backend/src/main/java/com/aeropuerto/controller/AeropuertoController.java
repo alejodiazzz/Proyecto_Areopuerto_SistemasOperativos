@@ -15,9 +15,17 @@ public class AeropuertoController {
 
     @GetMapping("/simular")
     public String simular(@RequestParam(defaultValue = "5") int aviones) {
+        service.resetContadores();
         for (int i = 1; i <= aviones; i++) {
             new AvionThread(i, service).start();
         }
         return "Simulación iniciada con " + aviones + " aviones.";
+    }
+
+    @GetMapping("/resultados")
+    public String getResultados() {
+        return "Resultados de la Simulación:\n" +
+               "Aviones servidos (Seguro - Mutex): " + service.getContadorSeguro() + "\n" +
+               "Aviones servidos (Inseguro - Race Condition): " + service.getContadorInseguro();
     }
 }
