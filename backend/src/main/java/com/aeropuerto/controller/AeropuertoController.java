@@ -1,13 +1,16 @@
 package com.aeropuerto.controller;
 
-import com.aeropuerto.model.AvionThread;
-import com.aeropuerto.service.AeropuertoService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.aeropuerto.model.AvionThread;
+import com.aeropuerto.service.AeropuertoService;
+
 @RestController
+@CrossOrigin(origins = "*")
 public class AeropuertoController {
 
     @Autowired
