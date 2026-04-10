@@ -73,5 +73,149 @@ Una vez que ambos componentes estén activos:
 │   └── styles.css          # Estilos premium y animaciones
 └── README.md               # Este archivo
 ```
+# Diseño del Sistema - Simulación de Aeropuerto Concurrente
+
+Este documento describe la arquitectura, el diseño de clases y los flujos de procesos del sistema de simulación de aeropuerto.
+
+## 1. Arquitectura de Alto Nivel
+
+El sistema sigue una arquitectura de **Microservicios Simplificada** con comunicación en tiempo real:
+
+-   **Backend (Java + Spring Boot)**: Gestiona la lógica de concurrencia, el ciclo de vida de los hilos y la sincronización de recursos.
+-   **Frontend (HTML + JS)**: Panel de control visual que recibe actualizaciones de estado mediante WebSockets.
+-   **Comunicación (WebSocket/STOMP)**: Canal bidireccional para enviar eventos desde el servidor al cliente sin necesidad de polling.
+
+---
+
+## 2. Diagrama de Clases (UML)
+
+Este diagrama muestra la relación entre los componentes principales del backend.
+
+```mermaid
+classDiagram
+    class AeropuertoApplication {
+        +main(args: String[])
+    }
+
+    class AeropuertoController {
+        -service: AeropuertoService
+        +iniciarSimulacion(numAviones: int)
+        +resetearContadores()
+    }
+
+    class AeropuertoService {
+        -semPistas: Semaphore
+        -semPuertas: Semaphore
+        -lockSincronizacion: ReentrantLock
+        -messagingTemplate: SimpMessagingTemplate
+        +procesoCompleto(avionId: int)
+        -notificar(id: int, estado: String, msg: String)
+        -incrementarContadores()
+    }
+
+    class AvionThread {
+        -id: int
+        -service: AeropuertoService
+        +run()
+    }
+
+    class EventoAvion {
+        +id: int
+        +estado: String
+        +mensaje: String
+        +timestamp: long
+    }
+
+    AeropuertoApplication ..> AeropuertoController : "Inicia"
+    AeropuertoController --> AeropuertoService : "Usa"
+    AeropuertoService ..> AvionThread : "Crea/Inicia"
+    AvionThread --> AeropuertoService : "Llama procesoCompleto"
+    AeropuertoService ..> EventoAvion : "Genera"
+    AeropuertoService --> SimpMessagingTemplate : "Envía eventos"
+```
+
+---
+
+## 3. Diagrama de Flujo (Lógica del Avión)
+
+Describe el ciclo de vida de un avión y cómo interactúa con los recursos compartidos (Pistas y Puertas).
+
+```mermaid
+flowchart TD
+    Start([Inicio del Hilo Avión]) --> SolicitarLanding[Solicitar Pista y Puerta]
+    
+    subgraph Sincronizacion_Compuesta [Sincronización Compuesta]
+        Lock[Adquirir Lock Sincronización] --> Check{¿Pista > 0 Y Puerta > 0?}
+        Check -- No --> UnlockWait[Liberar Lock y Esperar 500ms]
+        UnlockWait --> Lock
+        Check -- Sí --> AcquireBoth[Adquirir Pista y Puerta]
+        AcquireBoth --> Unlock[Liberar Lock]
+    end
+
+    Unlock --> Aterrizando[Aterrizando - 2s]
+    Aterrizando --> LiberarPista[Liberar Pista]
+    LiberarPista --> EnPuerta[Permanecer en Puerta - 5s]
+    EnPuerta --> SolicitarTakeoff[Solicitar Pista para Despegar]
+    
+    SolicitarTakeoff --> AcquirePista[Adquirir Pista - Bloqueante]
+    AcquirePista --> Despegando[Despegando - 2s]
+    Despegando --> LiberarTodo[Liberar Pista y Puerta]
+    LiberarTodo --> Incrementar[Incrementar Contadores de Análisis]
+    Incrementar --> End([Fin del Proceso])
+```
+
+---
+
+## 4. Diagrama de Secuencia (Comunicación Tiempo Real)
+
+Muestra la interacción entre el usuario, el backend y el dashboard visual.
+
+```mermaid
+sequenceDiagram
+    participant U as Usuario (Frontend)
+    participant C as AeropuertoController
+    participant S as AeropuertoService
+    participant T as AvionThread
+    participant JS as Dashboard (JS)
+
+    U->>C: Iniciar Simulación (POST)
+    C->>S: Crear Aviones
+    loop Para cada avión
+        S->>T: new AvionThread().start()
+    end
+    
+    activate T
+    T->>S: procesoCompleto(id)
+    S->>S: adquirirRecursos()
+    S-->>JS: WebSocket: SOLICITANDO_ATERRIZAJE
+    Note over S,JS: Mensaje vía /topic/aeropuerto
+    
+    S-->>JS: WebSocket: ATERRIZANDO
+    S->>S: sleep(2000)
+    
+    S-->>JS: WebSocket: EN_PUERTA
+    Note right of T: Pista liberada
+    
+    S->>S: sleep(5000)
+    
+    S-->>JS: WebSocket: DESPEGANDO
+    T->>S: liberarRecursos()
+    S-->>JS: WebSocket: FINALIZADO
+    deactivate T
+```
+
+---
+
+## 5. Análisis de Concurrencia y Sincronización
+
+### Recursos Limitados
+-   **Pistas (2)**: Controladas por `Semaphore semPistas`. Es un recurso crítico tanto para aterrizaje como para despegue.
+-   **Puertas de Embarque (4)**: Controladas por `Semaphore semPuertas`. El avión la mantiene ocupada durante toda su estancia en el aeropuerto.
+
+### Estrategias de Sincronización
+1.  **Sincronización Compuesta**: Para evitar que un avión bloquee una pista si no hay puertas disponibles (lo cual causaría un posible deadlock o espera innecesaria de la pista), el sistema utiliza un `ReentrantLock` para verificar la disponibilidad de **ambos** recursos de forma atómica antes de adquirirlos.
+2.  **Prevención de Deadlocks**: Al liberar la pista inmediatamente después del aterrizaje, se permite que otros aviones despeguen mientras el primero desembarca en la puerta.
+3.  **Condiciones de Carrera (Análisis)**: El sistema incluye un `contadorInseguro` y un `contadorSeguro` (`ReentrantLock`) para demostrar visualmente en el dashboard cómo la falta de sincronización en variables compartidas produce resultados incorrectos bajo carga.
+
 
 
